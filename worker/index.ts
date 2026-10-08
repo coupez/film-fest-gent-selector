@@ -51,7 +51,8 @@ export default {
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
     const room = env.ROOM.get(env.ROOM.idFromName(ROOM_NAME));
-    const secure = url.protocol === "https:";
+    // Behind a tunnel (cloudflared → localhost) the Worker sees http; the browser is still on https.
+    const secure = url.protocol === "https:" || req.headers.get("X-Forwarded-Proto") === "https";
 
     if (url.pathname === "/api/login" && req.method === "POST") {
       const { user } = (await req.json().catch(() => ({}))) as { user?: string };
@@ -83,11 +84,19 @@ export default {
           return json({ error: "Bad vote" }, { status: 400 });
         return json(await room.vote(user, body.filmId, vote));
       }
-      case "POST /api/settings":
-        return json(await room.setSettings(user, body.settings as Partial<Settings>));
-      case "POST /api/seen":
-        await room.markSeen(user, (body.filmIds as string[]) || []);
+      case "POST /api/settings": {
+        const patch = body.settings;
+        if (!patch || typeof patch !== "object" || Array.isArray(patch)) return json({ error: "Bad settings" }, { status: 400 });
+        // Only accept known keys, so a stray field can't end up in everyone's shared settings.
+        const clean = Object.fromEntries(Object.entries(patch).filter(([k]) => k in DEFAULT_SETTINGS)) as Partial<Settings>;
+        return json(await room.setSettings(user, clean));
+      }
+      case "POST /api/seen": {
+        const ids = body.filmIds;
+        if (!Array.isArray(ids) || !ids.every((x) => typeof x === "string")) return json({ error: "Bad filmIds" }, { status: 400 });
+        await room.markSeen(user, ids);
         return json({ ok: true });
+      }
       case "POST /api/reset":
         await room.resetVotes(user);
         return json(await room.getState());
