@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NOW, film, imdb, screening, settings } from "../test/fixtures";
+import { DEFAULT_SETTINGS } from "../../shared/types";
 import { festivalDays, posterOf, score, sortViews, viewFilm } from "./deck";
 
 const view = (f: ReturnType<typeof film>, over = {}) => viewFilm(f, settings(over), NOW);
@@ -40,10 +41,15 @@ describe("viewFilm: screenings", () => {
     expect(view(f).screenings.map((x) => x.past)).toEqual([true, false]);
   });
 
-  it("hides sold-out screenings only when hideSoldOut is on", () => {
+  it("hides sold-out screenings by default, unless hideSoldOut is off", () => {
     const f = film({ screenings: [screening({ soldOut: true })] });
-    expect(view(f).passes).toBe(true);
-    expect(view(f, { hideSoldOut: true }).passes).toBe(false);
+    expect(view(f).passes).toBe(false);
+    expect(view(f, { hideSoldOut: false }).passes).toBe(true);
+  });
+
+  it("keeps a film when only some of its screenings are sold out", () => {
+    const f = film({ screenings: [screening({ soldOut: true }), screening({ date: "2026-10-14" })] });
+    expect(view(f).eligible.map((x) => x.s.date)).toEqual(["2026-10-14"]);
   });
 
   it("filters by day", () => {
@@ -61,9 +67,16 @@ describe("viewFilm: screenings", () => {
 });
 
 describe("viewFilm: film filters", () => {
-  it("filters by kind", () => {
+  it("shows only films by default", () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({ kinds: ["film"], hidePast: true, hideSoldOut: true });
+    expect(view(film({ kind: "film" })).passes).toBe(true);
+    expect(view(film({ kind: "concert" })).passes).toBe(false);
     expect(view(film({ kind: "talk" })).passes).toBe(false);
-    expect(view(film({ kind: "concert" })).passes).toBe(true);
+  });
+
+  it("filters by kind", () => {
+    expect(view(film({ kind: "concert" }), { kinds: ["film", "concert"] }).passes).toBe(true);
+    expect(view(film({ kind: "film" }), { kinds: ["concert"] }).passes).toBe(false);
   });
 
   it("filters by section; empty means all", () => {

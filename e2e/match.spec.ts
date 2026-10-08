@@ -40,7 +40,8 @@ test.afterEach(async () => {
 
 test("first run shows the filters, then both decks start on the same film", async () => {
   await expect(lucas.getByRole("heading", { name: "Hi Lucas, let's set the stage" })).toBeVisible();
-  await expect(lucas.locator(".cta-count")).toHaveText("151 to rate · 151 total");
+  // The count shrinks as screenings start or sell out, so just check nothing is rated yet.
+  await expect(lucas.locator(".cta-count")).toHaveText(/^(\d+) to rate · \1 total$/);
   await lucas.getByRole("button", { name: /Start swiping/ }).click();
   await margarita.getByRole("button", { name: /Start swiping/ }).click();
   await expectTop(margarita).toBe(await topTitle(lucas));
@@ -120,12 +121,12 @@ test("drag, arrow keys and undo move through the deck", async () => {
 
 test("a filter change on one phone updates the other", async () => {
   await lucas.getByRole("button", { name: /Start swiping/ }).click();
-  await expect(lucas.locator(".progress-text")).toContainText("0 / 151 rated");
+  const total = (await lucas.locator(".progress-text").textContent())!.match(/0 \/ (\d+) rated/)![1];
   await margarita.locator(".day-chip:not(.all)").last().click();
-  await expect(lucas.locator(".progress-text")).not.toContainText("/ 151 rated");
+  await expect(lucas.locator(".progress-text")).not.toContainText(`/ ${total} rated`);
   await expect(lucas.locator(".toast", { hasText: "Margarita tweaked the filters" })).toBeVisible();
   await margarita.locator(".day-chip.all").click();
-  await expect(lucas.locator(".progress-text")).toContainText("0 / 151 rated");
+  await expect(lucas.locator(".progress-text")).toContainText(`0 / ${total} rated`);
 });
 
 // Real touch input (Chromium's touch emulation): scrolling a card must not swipe it.

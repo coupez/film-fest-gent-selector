@@ -23,11 +23,11 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   langs: Object.fromEntries(USERS.map((u) => [u.id, [...u.langs]])) as Record<UserId, string[]>,
-  kinds: ["film", "concert"],
+  kinds: ["film"],
   days: [],
   sections: [],
   hidePast: true,
-  hideSoldOut: false,
+  hideSoldOut: true,
   includeUnknownLanguage: false,
   minImdb: 0,
   order: "shuffle",
