@@ -582,6 +582,13 @@ p {
   transform: scale(1.2);
   opacity: 0.7;
 }
+/* Shown when every image source fails, so a card is never an empty black box. */
+.poster-fallback {
+  background:
+    radial-gradient(120% 70% at 20% 10%, rgba(255, 77, 109, 0.45), transparent 60%),
+    radial-gradient(90% 60% at 90% 40%, rgba(192, 132, 252, 0.35), transparent 65%),
+    var(--surface-2);
+}
 .poster-shade {
   position: absolute;
   inset: 0;
