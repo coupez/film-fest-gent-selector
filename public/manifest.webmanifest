@@ -1,0 +1,9 @@
+{
+  "name": "ReelMatch · Film Fest Gent",
+  "short_name": "ReelMatch",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0a0f",
+  "theme_color": "#0b0a0f",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
