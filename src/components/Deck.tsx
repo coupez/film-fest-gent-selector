@@ -1,5 +1,5 @@
 import { AnimatePresence, animate, motion, motionValue, useTransform, type MotionValue, type PanInfo } from "motion/react";
-import { Img } from "./Img";
+import { Img, preload } from "./Img";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { Vote } from "../../shared/types";
 import { posterOf, type FilmView } from "../lib/deck";
@@ -28,7 +28,8 @@ const cardVariants = {
 
 export function Deck({ onOpenMatches, onOpenFilters }: { onOpenMatches: () => void; onOpenFilters: () => void }) {
   const store = useStore();
-  const { deck, views, vote, undo, canUndo, me, partner, room } = store;
+  const { deck, views, vote, undo, canUndo, me, partner, room, matchQueue } = store;
+  const modalOpen = matchQueue.length > 0;
   const xs = useRef(new Map<string, MotionValue<number>>());
   const exitDir = useRef<Dir>(1);
   const [backDir, setBackDir] = useState<Dir | undefined>();
@@ -69,7 +70,7 @@ export function Deck({ onOpenMatches, onOpenFilters }: { onOpenMatches: () => vo
   // Keyboard: ← nope, → like, ↑ / space details, backspace undo.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.closest("input, textarea")) return;
+      if (modalOpen || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement)?.closest("input, textarea")) return;
       if (e.key === "ArrowRight") decide("like");
       else if (e.key === "ArrowLeft") decide("nope");
       else if (e.key === "Backspace" || e.key.toLowerCase() === "z") doUndo();
@@ -80,17 +81,14 @@ export function Deck({ onOpenMatches, onOpenFilters }: { onOpenMatches: () => vo
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decide, doUndo, showInfo]);
+  }, [decide, doUndo, showInfo, modalOpen]);
 
   const voted = views.length - deck.length;
   const partnerVotes = Object.keys(room.votes[partner.id] || {}).filter((id) => views.some((v) => v.film.id === id)).length;
 
   // Warm the image cache for the next few cards.
   useEffect(() => {
-    deck.slice(3, 7).forEach((v) => {
-      const img = new Image();
-      img.src = posterOf(v.film).src;
-    });
+    deck.slice(3, 7).forEach((v) => preload(posterOf(v.film).srcs));
   }, [deck]);
 
   return (
@@ -206,7 +204,13 @@ const SwipeCard = memo(function SwipeCard({ view, index, x, custom, onDecide, sc
       >
         <div className="poster" onClick={() => localRef.current?.scrollTo({ top: localRef.current.clientHeight * 0.82, behavior: "smooth" })}>
           {!poster.portrait && <Img className="poster-blur" srcs={poster.srcs} alt="" />}
-          <Img className={`poster-img ${poster.portrait ? "portrait" : "landscape"}`} srcs={poster.srcs} alt="" decoding="async" />
+          <Img
+            className={`poster-img ${poster.portrait ? "portrait" : "landscape"}`}
+            srcs={poster.srcs}
+            alt=""
+            decoding="async"
+            fallback={<div className="poster-img poster-fallback" />}
+          />
           <div className="poster-shade" />
           <motion.div className="stamp like" style={{ opacity: likeOpacity }}>
             Want to see

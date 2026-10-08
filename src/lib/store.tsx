@@ -73,13 +73,17 @@ export function StoreProvider({
       .map((m) => ({ filmId: m.filmId, by: otherUser(me.id).id, missed: true })),
   );
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [history, setHistory] = useState<string[]>([]);
+  // Each vote I cast, with what it replaced, so undo can put it back.
+  const [history, setHistory] = useState<{ filmId: string; prev: Vote | null }[]>([]);
   const [now, setNow] = useState(() => new Date());
   const partner = otherUser(me.id);
   const films = useMemo(() => new Map(programme.films.map((f) => [f.id, f])), [programme]);
   const roomRef = useRef(room);
   roomRef.current = room;
   const lastPresenceToast = useRef(0);
+  const lastSettingsToast = useRef(0);
+  const settingsTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pending = useRef<Partial<Settings>>({});
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60_000);
@@ -101,6 +105,9 @@ export function StoreProvider({
       const matches = match ? (has ? r.matches : [{ filmId, at }, ...r.matches]) : r.matches.filter((m) => m.filmId !== filmId);
       return { ...r, votes: { ...r.votes, [user]: mine }, matches };
     });
+    // A match that's gone (undo, flipped vote) must not linger in the queue: if it comes back,
+    // it's a new event with a new "who completed it".
+    if (!match) setMatchQueue((q) => (q.some((x) => x.filmId === filmId) ? q.filter((x) => x.filmId !== filmId) : q));
   }, []);
 
   // Live updates from the room.
@@ -115,8 +122,12 @@ export function StoreProvider({
             if (navigator.vibrate) navigator.vibrate([30, 40, 60]);
           }
         } else if (m.type === "settings") {
-          setRoom((r) => ({ ...r, settings: m.settings }));
-          if (m.settings.updatedBy && m.settings.updatedBy !== me.id) toast(`${partner.name} tweaked the filters`);
+          // Keep my own edits that haven't been sent yet on top of what the server echoes back.
+          setRoom((r) => ({ ...r, settings: { ...m.settings, ...pending.current } }));
+          if (m.settings.updatedBy && m.settings.updatedBy !== me.id && Date.now() - lastSettingsToast.current > 10_000) {
+            lastSettingsToast.current = Date.now();
+            toast(`${partner.name} tweaked the filters`);
+          }
         } else if (m.type === "presence") {
           setRoom((r) => {
             const wasOnline = r.online.includes(partner.id);
@@ -148,14 +159,24 @@ export function StoreProvider({
   const myVotes = room.votes[me.id] || {};
   const deck = useMemo(() => views.filter((v) => !myVotes[v.film.id]), [views, myVotes]);
 
-  const vote = useCallback(
+  const markSeenLocally = useCallback(
+    (filmId: string) =>
+      setRoom((r) => {
+        const mine = r.seen[me.id] || [];
+        return mine.includes(filmId) ? r : { ...r, seen: { ...r.seen, [me.id]: [...mine, filmId] } };
+      }),
+    [me.id],
+  );
+
+  const sendVote = useCallback(
     (filmId: string, v: Vote | null) => {
       const prev = roomRef.current.votes[me.id]?.[filmId];
       const partnerLikes = roomRef.current.votes[partner.id]?.[filmId]?.vote === "like";
       const predictedMatch = v === "like" && partnerLikes;
       applyVote(me.id, filmId, v, Date.now(), predictedMatch);
-      if (v) setHistory((h) => [...h.slice(-50), filmId]);
       if (predictedMatch && !roomRef.current.matches.some((m) => m.filmId === filmId)) {
+        // The server marks the match as seen for whoever completes it; mirror that locally.
+        markSeenLocally(filmId);
         setMatchQueue((q) => [...q, { filmId, by: me.id }]);
         if (navigator.vibrate) navigator.vibrate([30, 40, 60]);
       }
@@ -167,20 +188,26 @@ export function StoreProvider({
           toast("Couldn't save that vote — check your connection");
         });
     },
-    [me.id, partner.id, applyVote, toast],
+    [me.id, partner.id, applyVote, markSeenLocally, toast],
+  );
+
+  const vote = useCallback(
+    (filmId: string, v: Vote | null) => {
+      const prev = roomRef.current.votes[me.id]?.[filmId]?.vote ?? null;
+      if (v && v !== prev) setHistory((h) => [...h.slice(-50), { filmId, prev }]);
+      sendVote(filmId, v);
+    },
+    [me.id, sendVote],
   );
 
   const undo = useCallback(() => {
     const last = history[history.length - 1];
     if (!last) return null;
     setHistory((h) => h.slice(0, -1));
-    vote(last, null);
-    setHistory((h) => h.filter((x) => x !== last));
-    return last;
-  }, [history, vote]);
+    sendVote(last.filmId, last.prev);
+    return last.filmId;
+  }, [history, sendVote]);
 
-  const settingsTimer = useRef<ReturnType<typeof setTimeout>>();
-  const pending = useRef<Partial<Settings>>({});
   const updateSettings = useCallback(
     (patch: Partial<Settings>) => {
       setRoom((r) => ({ ...r, settings: { ...r.settings, ...patch } }));
@@ -196,11 +223,13 @@ export function StoreProvider({
   );
 
   const dismissMatch = useCallback(() => {
-    setMatchQueue((q) => {
-      if (q[0]) api.seen([q[0].filmId]).catch(() => {});
-      return q.slice(1);
-    });
-  }, []);
+    const first = matchQueue.find((m) => films.has(m.filmId) && room.matches.some((x) => x.filmId === m.filmId));
+    setMatchQueue((q) => q.filter((m) => m !== first && room.matches.some((x) => x.filmId === m.filmId)));
+    if (first) {
+      markSeenLocally(first.filmId);
+      api.seen([first.filmId]).catch(() => {});
+    }
+  }, [matchQueue, films, room.matches, markSeenLocally]);
 
   const resetVotes = useCallback(async () => {
     setRoom(await api.reset());
@@ -222,7 +251,8 @@ export function StoreProvider({
     now,
     views,
     deck,
-    matchQueue: matchQueue.filter((m) => films.has(m.filmId)),
+    // A match can disappear again (undo, flipped vote, reset); never celebrate one that's gone.
+    matchQueue: matchQueue.filter((m) => films.has(m.filmId) && room.matches.some((x) => x.filmId === m.filmId)),
     toasts,
     canUndo: history.length > 0,
     vote,
