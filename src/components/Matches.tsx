@@ -81,7 +81,8 @@ function MatchGrid({ views, onOpen }: { views: FilmView[]; onOpen: (id: string) 
   return (
     <div className="grid">
       {views.map((v, i) => {
-        const next = v.eligible[0] ?? v.screenings.find((x) => !x.past);
+        const picked = room.picks[v.film.id] && v.screenings.find((x) => x.s.id === room.picks[v.film.id].screeningId);
+        const next = picked || v.eligible[0] || v.screenings.find((x) => !x.past);
         return (
           <motion.button
             key={v.film.id}
@@ -101,9 +102,10 @@ function MatchGrid({ views, onOpen }: { views: FilmView[]; onOpen: (id: string) 
               <b>{v.film.title}</b>
               <span>{metaLine(v.film)}</span>
               {next ? (
-                <span className={`next ${next.eligible ? "" : "warn"}`}>
-                  <Icon name="calendar" size={12} /> {relativeDay(next.s.date, now)} · {next.s.time}
-                  {!next.eligible && " (check subs)"}
+                <span className={`next ${picked ? "going" : next.eligible ? "" : "warn"}`}>
+                  <Icon name={picked ? "check" : "calendar"} size={12} stroke={picked ? 3 : 2} /> {picked ? "Going " : ""}
+                  {relativeDay(next.s.date, now)} · {next.s.time}
+                  {!picked && !next.eligible && " (check subs)"}
                 </span>
               ) : (
                 <span className="next warn">No more screenings</span>
@@ -118,39 +120,71 @@ function MatchGrid({ views, onOpen }: { views: FilmView[]; onOpen: (id: string) 
 
 const minutes = (f: Film) => f.runtime ?? f.screenedFilm?.runtime ?? 100;
 
+type ScheduleFilter = "all" | "open" | "picked";
+
 function Schedule({ views, onOpen }: { views: FilmView[]; onOpen: (id: string) => void }) {
+  const { room, pick, partner } = useStore();
   const [onlyFitting, setOnlyFitting] = useState(true);
+  const [filter, setFilter] = useState<ScheduleFilter>("all");
+  const picks = room.picks;
+
   const items = useMemo(() => {
-    const all: { film: Film; info: ScreeningInfo; end: Date }[] = [];
-    for (const v of views)
-      for (const info of v.screenings) {
-        if (info.past || (onlyFitting && !info.eligible)) continue;
-        all.push({ film: v.film, info, end: new Date(info.start.getTime() + minutes(v.film) * 60000) });
+    const all: { film: Film; info: ScreeningInfo; end: Date; picked: boolean }[] = [];
+    for (const v of views) {
+      // Once we've picked a screening, the film's other screenings drop out: we only need to see it once.
+      const chosen = picks[v.film.id] && v.screenings.find((x) => x.s.id === picks[v.film.id].screeningId);
+      const list = chosen ? [chosen] : v.screenings.filter((x) => !onlyFitting || x.eligible);
+      for (const info of list) {
+        if (info.past) continue;
+        all.push({ film: v.film, info, end: new Date(info.start.getTime() + minutes(v.film) * 60000), picked: !!chosen });
       }
+    }
     all.sort((a, b) => a.info.start.getTime() - b.info.start.getTime());
     return all;
-  }, [views, onlyFitting]);
+  }, [views, onlyFitting, picks]);
 
   if (!views.length) return <NoMatches />;
-  const days = [...new Set(items.map((x) => x.info.s.date))];
+  const pickedCount = new Set(items.filter((x) => x.picked).map((x) => x.film.id)).size;
+  const openCount = new Set(items.filter((x) => !x.picked).map((x) => x.film.id)).size;
+  const shown = items.filter((x) => filter === "all" || (filter === "picked") === x.picked);
+  const days = [...new Set(shown.map((x) => x.info.s.date))];
   return (
     <div className="schedule">
+      <div className="chips center">
+        {(
+          [
+            ["all", "All"],
+            ["open", `To decide · ${openCount}`],
+            ["picked", `Picked · ${pickedCount}`],
+          ] as [ScheduleFilter, string][]
+        ).map(([k, label]) => (
+          <button key={k} className={`chip toggle ${filter === k ? "on" : ""}`} onClick={() => setFilter(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
       <label className="switch-row compact">
         <span>Only screenings that work language-wise</span>
         <Switch on={onlyFitting} onChange={setOnlyFitting} />
       </label>
-      {!items.length && <p className="muted center">No upcoming screenings for your matches.</p>}
+      {!shown.length && (
+        <p className="muted center">
+          {filter === "picked" ? "Nothing picked yet — tap ✓ on the screening you'll go to." : filter === "open" ? "Every match has a screening picked." : "No upcoming screenings for your matches."}
+        </p>
+      )}
       {days.map((d) => (
         <section key={d} className="day">
           <h3>
             {fmtWeekdayLong(d)} <span>{fmtDayMonth(d)}</span>
           </h3>
-          {items
+          {shown
             .filter((x) => x.info.s.date === d)
             .map((x) => {
-              const clash = items.find((y) => y !== x && y.info.start < x.end && x.info.start < y.end);
+              const overlaps = items.filter((y) => y !== x && y.info.start < x.end && x.info.start < y.end);
+              const clash = (x.picked && overlaps.find((y) => y.picked)) || overlaps[0];
+              const by = picks[x.film.id]?.by;
               return (
-                <div key={x.info.s.id + x.film.id} className="slot" onClick={() => onOpen(x.film.id)}>
+                <div key={x.info.s.id + x.film.id} className={`slot ${x.picked ? "picked" : ""}`} onClick={() => onOpen(x.film.id)}>
                   <div className="slot-time">
                     <b>{x.info.s.time}</b>
                     <span>{x.end.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}</span>
@@ -162,17 +196,36 @@ function Schedule({ views, onOpen }: { views: FilmView[]; onOpen: (id: string) =
                       <Icon name="pin" size={12} /> {x.info.s.venue}
                       {x.info.s.subtitles.length > 0 && ` · ${x.info.s.subtitles.join("/")} subs`}
                     </span>
-                    {clash && <span className="clash">Overlaps with {clash.film.title}</span>}
+                    {x.picked && <span className="going">Going{by === partner.id ? ` · picked by ${partner.name}` : ""}</span>}
+                    {clash && (
+                      <span className={`clash ${x.picked && clash.picked ? "hard" : ""}`}>
+                        {x.picked && clash.picked ? "Clashes with your pick " : "Overlaps with "}
+                        {clash.film.title}
+                      </span>
+                    )}
                   </div>
-                  {x.info.s.soldOut ? (
-                    <span className="pill sold">Sold out</span>
-                  ) : (
-                    x.info.s.ticketUrl && (
-                      <a className="pill ticket" href={x.info.s.ticketUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                        <Icon name="ticket" size={14} />
-                      </a>
-                    )
-                  )}
+                  <div className="slot-actions">
+                    <button
+                      className={`pick-btn ${x.picked ? "on" : ""}`}
+                      aria-label={x.picked ? `Unpick ${x.film.title}` : `Pick this screening of ${x.film.title}`}
+                      aria-pressed={x.picked}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        pick(x.film.id, x.picked ? null : x.info.s.id);
+                      }}
+                    >
+                      <Icon name="check" size={16} stroke={3} />
+                    </button>
+                    {x.info.s.soldOut ? (
+                      <span className="pill sold">Sold out</span>
+                    ) : (
+                      x.info.s.ticketUrl && (
+                        <a className="pill ticket" href={x.info.s.ticketUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Tickets">
+                          <Icon name="ticket" size={14} />
+                        </a>
+                      )
+                    )}
+                  </div>
                 </div>
               );
             })}

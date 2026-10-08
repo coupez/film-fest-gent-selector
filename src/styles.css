@@ -1392,6 +1392,44 @@ p {
   color: var(--hot-2);
   font-weight: 600;
 }
+.slot.picked {
+  border-color: rgba(47, 224, 160, 0.45);
+  background: linear-gradient(90deg, rgba(47, 224, 160, 0.1), transparent 70%), var(--surface);
+}
+.slot-body .going,
+.tile .next.going {
+  color: var(--like);
+  font-weight: 700;
+}
+.slot-body .clash.hard {
+  color: var(--nope);
+}
+.slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pick-btn {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1.5px dashed var(--line-2);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.pick-btn:hover {
+  border-color: var(--like);
+  color: var(--like);
+}
+.pick-btn.on {
+  border: 0;
+  background: var(--like);
+  color: #06281c;
+}
 .slot .pill.ticket {
   width: 38px;
   height: 38px;

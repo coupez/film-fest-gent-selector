@@ -160,3 +160,43 @@ test("scrolling a card vertically by touch doesn't swipe it; a horizontal touch 
   await expectTop(lucas).not.toBe(first);
   await expect.poll(async () => Object.values(await votesOf(lucas, "lucas")).map((v) => v.vote)).toEqual(["like"]);
 });
+
+test("picking a screening in the schedule hides the film's other screenings on both phones", async () => {
+  for (const p of [lucas, margarita]) await p.getByRole("button", { name: /Start swiping/ }).click();
+  const film = await topTitle(lucas);
+  await lucas.getByRole("button", { name: "Like" }).click();
+  await margarita.getByRole("button", { name: "Like" }).click();
+  for (const p of [lucas, margarita]) {
+    await p.getByRole("button", { name: "Keep swiping" }).click();
+    await p.locator(".tabbar button", { hasText: "Matches" }).click();
+    await p.getByRole("button", { name: "Schedule" }).click();
+  }
+  const slots = (p: Page) => p.locator(".slot", { hasText: film });
+  const total = await slots(lucas).count();
+  test.skip(total < 2, `"${film}" has only ${total} upcoming screening; nothing to hide`);
+  await expect(slots(margarita)).toHaveCount(total);
+  await expect(lucas.getByRole("button", { name: "To decide · 1" })).toBeVisible();
+
+  // Lucas picks the second screening: every other screening of the film disappears, live on both phones.
+  const chosen = slots(lucas).nth(1);
+  const time = await chosen.locator(".slot-time b").textContent();
+  await chosen.getByRole("button", { name: /Pick this screening/ }).click();
+  for (const p of [lucas, margarita]) {
+    await expect(slots(p)).toHaveCount(1);
+    await expect(slots(p).locator(".slot-time b")).toHaveText(time!);
+    await expect(slots(p)).toHaveClass(/picked/);
+    await expect(p.getByRole("button", { name: "Picked · 1" })).toBeVisible();
+    await expect(p.getByRole("button", { name: "To decide · 0" })).toBeVisible();
+  }
+  await expect(slots(margarita).locator(".going")).toHaveText("Going · picked by Lucas");
+  await expect(margarita.locator(".toast", { hasText: `Lucas picked ${film}` })).toBeVisible();
+  expect(Object.keys((await (await lucas.request.get("/api/state")).json()).picks)).toHaveLength(1);
+
+  // The pick survives a reload, and Margarita can undo it: all screenings come back.
+  await margarita.reload();
+  await margarita.locator(".tabbar button", { hasText: "Matches" }).click();
+  await margarita.getByRole("button", { name: "Schedule" }).click();
+  await expect(slots(margarita)).toHaveCount(1);
+  await slots(margarita).getByRole("button", { name: /Unpick/ }).click();
+  for (const p of [lucas, margarita]) await expect(slots(p)).toHaveCount(total);
+});

@@ -22,6 +22,8 @@ export const api = {
     call<Extract<ServerMessage, { type: "vote" }>>("/api/vote", { filmId, vote }),
   settings: (settings: Partial<Settings>) => call<Settings>("/api/settings", { settings }),
   seen: (filmIds: string[]) => call("/api/seen", { filmIds }),
+  pick: (filmId: string, screeningId: string | null) =>
+    call<Extract<ServerMessage, { type: "pick" }>>("/api/pick", { filmId, screeningId }),
   reset: () => call<RoomState>("/api/reset", {}),
   programme: () =>
     fetch("/data/films.json").then((r) => {

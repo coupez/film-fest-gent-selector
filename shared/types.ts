@@ -37,12 +37,21 @@ export interface RoomState {
   votes: Record<UserId, Record<string, { vote: Vote; at: number }>>;
   matches: { filmId: string; at: number }[];
   seen: Record<UserId, string[]>;
+  /** The screening we're going to, per matched film (shared by both people). */
+  picks: Record<string, Pick>;
   settings: Settings;
   online: UserId[];
+}
+
+export interface Pick {
+  screeningId: string;
+  by: UserId;
+  at: number;
 }
 
 export type ServerMessage =
   | { type: "vote"; user: UserId; filmId: string; vote: Vote | null; at: number; match: boolean; newMatch: boolean }
   | { type: "settings"; settings: Settings }
   | { type: "presence"; online: UserId[] }
+  | { type: "pick"; filmId: string; pick: Pick | null }
   | { type: "reset"; user: UserId };

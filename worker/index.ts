@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { USERS, findUser, type UserId } from "../shared/users";
-import { DEFAULT_SETTINGS, type RoomState, type Settings, type Vote, type ServerMessage } from "../shared/types";
+import { DEFAULT_SETTINGS, type Pick, type RoomState, type Settings, type Vote, type ServerMessage } from "../shared/types";
 
 export interface Env {
   ROOM: DurableObjectNamespace<Room>;
@@ -97,6 +97,12 @@ export default {
         await room.markSeen(user, ids);
         return json({ ok: true });
       }
+      case "POST /api/pick": {
+        const { filmId, screeningId } = body;
+        if (typeof filmId !== "string" || (screeningId !== null && typeof screeningId !== "string"))
+          return json({ error: "Bad pick" }, { status: 400 });
+        return json(await room.pick(user, filmId, screeningId));
+      }
       case "POST /api/reset":
         await room.resetVotes(user);
         return json(await room.getState());
@@ -120,6 +126,7 @@ export class Room extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS matches (film_id TEXT PRIMARY KEY, at INTEGER);
       CREATE TABLE IF NOT EXISTS seen (user TEXT, film_id TEXT, PRIMARY KEY (user, film_id));
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS picks (film_id TEXT PRIMARY KEY, screening_id TEXT, by TEXT, at INTEGER);
     `);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -145,7 +152,10 @@ export class Room extends DurableObject<Env> {
       .exec<{ film_id: string; at: number }>("SELECT * FROM matches ORDER BY at DESC")
       .toArray()
       .map((r) => ({ filmId: r.film_id, at: r.at }));
-    return { votes, matches, seen, settings: this.settings(), online: this.online() };
+    const picks: RoomState["picks"] = {};
+    for (const r of this.sql.exec<{ film_id: string; screening_id: string; by: UserId; at: number }>("SELECT * FROM picks"))
+      picks[r.film_id] = { screeningId: r.screening_id, by: r.by, at: r.at };
+    return { votes, matches, seen, picks, settings: this.settings(), online: this.online() };
   }
 
   async vote(user: UserId, filmId: string, vote: Vote | null) {
@@ -173,8 +183,24 @@ export class Room extends DurableObject<Env> {
     } else if (!isMatch && wasMatch) {
       this.sql.exec("DELETE FROM matches WHERE film_id = ?", filmId);
       this.sql.exec("DELETE FROM seen WHERE film_id = ?", filmId);
+      this.sql.exec("DELETE FROM picks WHERE film_id = ?", filmId);
     }
     const msg: ServerMessage = { type: "vote", user, filmId, vote, at, match: isMatch, newMatch: isMatch && !wasMatch };
+    this.broadcast(msg);
+    return msg;
+  }
+
+  /** Choose the screening we'll go to for a matched film, or clear it with `null`. */
+  async pick(user: UserId, filmId: string, screeningId: string | null) {
+    const isMatch = this.sql.exec("SELECT 1 FROM matches WHERE film_id = ?", filmId).toArray().length > 0;
+    let pick: Pick | null = null;
+    if (screeningId && isMatch) {
+      pick = { screeningId, by: user, at: Date.now() };
+      this.sql.exec("INSERT OR REPLACE INTO picks VALUES (?, ?, ?, ?)", filmId, screeningId, user, pick.at);
+    } else {
+      this.sql.exec("DELETE FROM picks WHERE film_id = ?", filmId);
+    }
+    const msg: ServerMessage = { type: "pick", filmId, pick };
     this.broadcast(msg);
     return msg;
   }
@@ -194,6 +220,7 @@ export class Room extends DurableObject<Env> {
     this.sql.exec("DELETE FROM votes WHERE user = ?", user);
     this.sql.exec("DELETE FROM matches");
     this.sql.exec("DELETE FROM seen");
+    this.sql.exec("DELETE FROM picks");
     this.broadcast({ type: "reset", user });
   }
 
