@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "npm run build && wrangler dev --port 8787",
     "typecheck": "tsc -p tsconfig.json && tsc -p worker/tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "tunnel": "cloudflared tunnel --url http://localhost:8787",
     "deploy": "npm run build && wrangler deploy"
   },
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261008.1",
+    "@playwright/test": "^1.64.0",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^6.1.2",
@@ -34,6 +37,7 @@
     "concurrently": "^10.0.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.3",
+    "vitest": "^5.0.3",
     "wrangler": "^4.148.0"
   },
   "private": true,

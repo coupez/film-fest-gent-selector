@@ -38,6 +38,15 @@ npm run deploy        # build + wrangler deploy
 npm run typecheck
 ```
 
+### Tests
+
+```bash
+npm test              # Vitest unit tests for the language rule and deck filtering (src/lib/*.test.ts)
+npm run test:e2e      # Playwright: two browser contexts (Lucas + Margarita) against `npm run preview`
+```
+
+The e2e tests reuse a server already running on :8787 (otherwise they start `npm run preview`), and they reset both people's votes and the shared filters, so don't run them against a room you care about. Run `npx playwright install chromium` once first.
+
 To test on two phones, run `npm run preview` in one terminal and `npm run tunnel` in another, then open the `trycloudflare.com` URL on both phones.
 
 ### Deploying to Cloudflare
